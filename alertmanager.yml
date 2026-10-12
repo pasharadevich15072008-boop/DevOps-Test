@@ -1,0 +1,18 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  group_by: ['alertname']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 1h
+  receiver: 'telegram'
+
+receivers:
+  - name: 'telegram'
+    telegram_configs:
+      - bot_token: '8943667542:AAF0lHRXSt4T65l8d3maPGURg74wuaS5e54'
+        chat_id: -5554282313
+        send_resolved: true
+        parse_mode: 'HTML'
+        message: '<b>{{ .Status | toUpper }}</b>: {{ .CommonAnnotations.summary }}\n{{ .CommonAnnotations.description }}'

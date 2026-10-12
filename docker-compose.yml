@@ -1,0 +1,221 @@
+version: '3.8'
+
+services:
+  postgres-db1:
+    image: postgres:15-alpine
+    container_name: postgres-db1
+    restart: always
+    environment:
+      POSTGRES_DB: zbx_db
+      POSTGRES_USER: zbx_user
+      POSTGRES_PASSWORD: zbx_password
+    volumes:
+      - pgdata1:/var/lib/postgresql/data
+    networks:
+      - zbx_net
+
+  postgres-db2:
+    image: postgres:15-alpine
+    container_name: postgres-db2
+    restart: always
+    environment:
+      POSTGRES_DB: zbx_db
+      POSTGRES_USER: zbx_user
+      POSTGRES_PASSWORD: zbx_password
+    volumes:
+      - pgdata2:/var/lib/postgresql/data
+    networks:
+      - zbx_net
+
+  haproxy:
+    image: haproxy:2.8.28-alpine
+    container_name: haproxy-balancer
+    restart: always
+    ports:
+      - "5432:5432"
+    depends_on:
+      - postgres-db1
+      - postgres-db2
+    volumes:
+      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    networks:
+      - zbx_net
+
+  zabbix-postgres:
+    image: postgres:15-alpine
+    container_name: zabbix-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: zbx_db
+      POSTGRES_USER: zbx_user
+      POSTGRES_PASSWORD: zbx_password
+    volumes:
+      - zabbix_pgdata:/var/lib/postgresql/data
+    networks:
+      - zbx_net
+
+  zabbix-server:
+    image: zabbix/zabbix-server-pgsql:alpine-latest
+    container_name: zabbix-server
+    restart: always
+    ports:
+      - "10051:10051"
+    environment:
+      DB_SERVER_HOST: zabbix-postgres
+      DB_SERVER_PORT: 5432
+      POSTGRES_DB: zbx_db
+      POSTGRES_USER: zbx_user
+      POSTGRES_PASSWORD: zbx_password
+    depends_on:
+      - zabbix-postgres
+    networks:
+      - zbx_net
+
+  zabbix-web:
+    image: zabbix/zabbix-web-nginx-pgsql:alpine-latest
+    container_name: zabbix-web
+    restart: always
+    ports:
+      - "8080:8080"
+    environment:
+      DB_SERVER_HOST: zabbix-postgres
+      DB_SERVER_PORT: 5432
+      POSTGRES_DB: zbx_db
+      POSTGRES_USER: zbx_user
+      POSTGRES_PASSWORD: zbx_password
+      ZBX_SERVER_HOST: zabbix-server
+      PHP_TZ: Europe/Minsk
+    depends_on:
+      - zabbix-server
+      - zabbix-postgres
+    networks:
+      - zbx_net
+
+  prometheus:
+      image: prom/prometheus:latest
+      container_name: prometheus
+      restart: always
+      ports:
+        - "9090:9090"
+      volumes:
+        - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+        - prometheus_data:/prometheus
+      command:
+        - '--config.file=/etc/prometheus/prometheus.yml'
+      networks:
+        - zbx_net
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: alertmanager
+    restart: always
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+    networks:
+      - zbx_net
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    restart: always
+    ports:
+      - "9100:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+    networks:
+      - zbx_net
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: cadvisor
+    restart: always
+    ports:
+      - "8081:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    devices:
+      - /dev/kmsg
+    networks:
+      - zbx_net
+
+  postgres-exporter-db1:
+    image: quay.io/prometheuscommunity/postgres-exporter:latest
+    container_name: postgres-exporter-db1
+    restart: always
+    ports:
+      - "9187:9187"
+    environment:
+      DATA_SOURCE_NAME: "postgresql://zbx_user:zbx_password@postgres-db1:5432/zbx_db?sslmode=disable"
+    depends_on:
+      - postgres-db1
+    networks:
+      - zbx_net
+
+  postgres-exporter-db2:
+    image: quay.io/prometheuscommunity/postgres-exporter:latest
+    container_name: postgres-exporter-db2
+    restart: always
+    ports:
+      - "9188:9187"
+    environment:
+      DATA_SOURCE_NAME: "postgresql://zbx_user:zbx_password@postgres-db2:5432/zbx_db?sslmode=disable"
+    depends_on:
+      - postgres-db2
+    networks:
+      - zbx_net
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=Pasharadevich789
+    volumes:
+      - grafana_data:/var/lib/grafana
+    networks:
+      - zbx_net
+
+  semaphore:
+    container_name: semaphore-ui
+    networks:
+      - zbx_net
+    ports:
+      - 3050:3000
+    image: public.ecr.aws/semaphore/pro/server:v2.16.51
+    environment:
+      SEMAPHORE_DB_DIALECT: sqlite
+      SEMAPHORE_ADMIN: pavel
+      SEMAPHORE_ADMIN_PASSWORD: Pasharadevich789
+      SEMAPHORE_ADMIN_NAME: Admin
+      SEMAPHORE_ADMIN_EMAIL: pasharadevich15072008@gmail.com
+    volumes:
+      - semaphore_data:/var/lib/semaphore
+    restart: unless-stopped
+
+networks:
+  zbx_net:
+    driver: bridge
+
+volumes:
+  pgdata1:
+  pgdata2:
+  prometheus_data:
+  grafana_data:
+  zabbix_pgdata:
+  semaphore_data:
